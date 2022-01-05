@@ -7,22 +7,9 @@ import (
 	"os"
 )
 
-func usagef(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	flag.Usage()
-	os.Exit(1)
-}
-
-func fatal(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: %+v\n", err)
-		os.Exit(1)
-	}
-}
-
 func main() {
 	var flagDictPath = flag.String("dict", "/usr/share/dict/american-english", "The dictionary path")
-	var flagVerbose = flag.Bool("verbose", false, "If we should show verbose output")
+	var flagMask = flag.String("m", "?????", "If we should match a position mask (e.g. ?i?e??)")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -37,13 +24,6 @@ func main() {
 
 	input := flag.Args()[0]
 	inputPermutations := permutations(input)
-	if *flagVerbose {
-		fmt.Println("Permutations:")
-		for p := range inputPermutations {
-			fmt.Println("\t" + p)
-		}
-		fmt.Println("Found:")
-	}
 
 	dictFile, err := os.Open(*flagDictPath)
 	fatal(err)
@@ -54,13 +34,46 @@ func main() {
 	for dictScanner.Scan() {
 		dictWord = dictScanner.Text()
 		if inputPermutations.Has(dictWord) {
-			if *flagVerbose {
-				fmt.Println("\t" + dictWord)
-			} else {
+			if matchesPositionMask(*flagMask, dictWord) {
 				fmt.Println(dictWord)
 			}
 		}
 	}
+}
+
+func usagef(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	flag.Usage()
+	os.Exit(1)
+}
+
+func fatal(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %+v\n", err)
+		os.Exit(1)
+	}
+}
+
+func matchesPositionMask(mask, input string) bool {
+	if mask == "" && input == "" {
+		return false
+	}
+	if mask == "" && input != "" {
+		return true
+	}
+	if len(mask) != len(input) {
+		return false
+	}
+	maskRunes := []rune(mask)
+	for index, r := range input {
+		if maskRunes[index] == '?' {
+			continue
+		}
+		if maskRunes[index] != r {
+			return false
+		}
+	}
+	return true
 }
 
 func permutations(input string) Set[string] {
@@ -81,7 +94,7 @@ func _permutations(input, working string, seen, output Set[string]) {
 		if !seen.Has(before) {
 			seen.Add(before)
 			_permutations(
-				string(sliceRemove([]rune(input), index)),
+				removeAt(input, index),
 				before,
 				seen,
 				output,
@@ -91,7 +104,7 @@ func _permutations(input, working string, seen, output Set[string]) {
 		if !seen.Has(after) {
 			seen.Add(after)
 			_permutations(
-				string(sliceRemove([]rune(input), index)),
+				removeAt(input, index),
 				after,
 				seen,
 				output,
@@ -100,11 +113,12 @@ func _permutations(input, working string, seen, output Set[string]) {
 	}
 }
 
-func sliceRemove[A any](values []A, index int) []A {
-	if len(values) == 0 {
-		return nil
+func removeAt(input string, index int) string {
+	if input == "" {
+		return ""
 	}
-	return append(values[:index], values[index+1:]...)
+	inputRunes := []rune(input)
+	return string(append(inputRunes[:index], inputRunes[index+1:]...))
 }
 
 type Set[A comparable] map[A]struct{}
