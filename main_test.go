@@ -5,7 +5,7 @@ import (
 )
 
 func Test_permutations(t *testing.T) {
-	p := permutations("abc")
+	p := permutations("abc", "")
 
 	expectHas := func(v string) {
 		if !p.Has(v) {

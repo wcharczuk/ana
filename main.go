@@ -8,22 +8,21 @@ import (
 )
 
 func main() {
-	var flagDictPath = flag.String("dict", "/usr/share/dict/american-english", "The dictionary path")
+	var flagDictPath = flag.String("dict", defaultDictionaryPath, "The dictionary path")
 	var flagMask = flag.String("m", "?????", "If we should match a position mask (e.g. ?i?e??)")
+	var flagInput = flag.String("i", "", "The input letter set")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
-		fmt.Printf("ana [flags] <input>")
+		fmt.Printf("ana [flags]")
 		oldUsage()
 	}
 	flag.Parse()
 
-	if len(flag.Args()) != 1 {
-		usagef("please supply a <input>")
+	var inputPermutations Set[string]
+	if *flagInput != "" {
+		inputPermutations = permutations(*flagInput, *flagMask)
 	}
-
-	input := flag.Args()[0]
-	inputPermutations := permutations(input)
 
 	dictFile, err := os.Open(*flagDictPath)
 	fatal(err)
@@ -33,11 +32,13 @@ func main() {
 	var dictWord string
 	for dictScanner.Scan() {
 		dictWord = dictScanner.Text()
-		if inputPermutations.Has(dictWord) {
-			if matchesPositionMask(*flagMask, dictWord) {
-				fmt.Println(dictWord)
-			}
+		if inputPermutations != nil && !inputPermutations.Has(dictWord) {
+			continue
 		}
+		if *flagMask != "" && !matchesPositionMask(*flagMask, dictWord) {
+			continue
+		}
+		fmt.Println(dictWord)
 	}
 }
 
@@ -76,17 +77,19 @@ func matchesPositionMask(mask, input string) bool {
 	return true
 }
 
-func permutations(input string) Set[string] {
+func permutations(input, mask string) Set[string] {
 	output := make(Set[string])
 	seen := make(Set[string])
 	var working string
-	_permutations(input, working, seen, output)
+	_permutations(input, mask, working, seen, output)
 	return output
 }
 
-func _permutations(input, working string, seen, output Set[string]) {
+func _permutations(input, mask, working string, seen, output Set[string]) {
 	if len(input) == 0 {
-		output.Add(string(working))
+		if mask != "" && matchesPositionMask(mask, string(working)) {
+			output.Add(string(working))
+		}
 		return
 	}
 	for index, c := range input {
@@ -95,6 +98,7 @@ func _permutations(input, working string, seen, output Set[string]) {
 			seen.Add(before)
 			_permutations(
 				removeAt(input, index),
+				mask,
 				before,
 				seen,
 				output,
@@ -105,6 +109,7 @@ func _permutations(input, working string, seen, output Set[string]) {
 			seen.Add(after)
 			_permutations(
 				removeAt(input, index),
+				mask,
 				after,
 				seen,
 				output,
