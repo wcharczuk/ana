@@ -2,15 +2,22 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	_ "embed"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
+//go:embed dictionary.txt
+var dictionary []byte
+
 func main() {
-	var flagDictPath = flag.String("dict", defaultDictionaryPath, "The dictionary path")
-	var flagMask = flag.String("m", "?????", "If we should match a position mask (e.g. ?i?e??)")
-	var flagInput = flag.String("i", "", "The input letter set")
+	var flagDictPath = flag.String("dict", "", "The dictionary path (optional, will use embedded dictionary by default)")
+	var flagMask = flag.String("mask", "?????", "If we should match a position mask (e.g. ?i?e??)")
+	var flagKnown = flag.String("known", "", "The known letter set")
+	var flagMaybe = flag.String("maybe", "", "The maybe letter set")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -20,12 +27,11 @@ func main() {
 	flag.Parse()
 
 	var inputPermutations Set[string]
-	if *flagInput != "" {
-		inputPermutations = permutations(*flagInput, *flagMask)
+	if *flagKnown != "" {
+		inputPermutations = permutations(*flagKnown, *flagMaybe, *flagMask)
 	}
 
-	dictFile, err := os.Open(*flagDictPath)
-	fatal(err)
+	dictFile := getDictionaryReader(*flagDictPath)
 	defer dictFile.Close()
 
 	dictScanner := bufio.NewScanner(dictFile)
@@ -55,6 +61,15 @@ func fatal(err error) {
 	}
 }
 
+func getDictionaryReader(dictPath string) io.ReadCloser {
+	if dictPath != "" {
+		dictFile, err := os.Open(dictPath)
+		fatal(err)
+		return dictFile
+	}
+	return io.NopCloser(bytes.NewReader(dictionary))
+}
+
 func matchesPositionMask(mask, input string) bool {
 	if mask == "" && input == "" {
 		return false
@@ -77,11 +92,28 @@ func matchesPositionMask(mask, input string) bool {
 	return true
 }
 
-func permutations(input, mask string) Set[string] {
+func permutations(known, maybe, mask string) Set[string] {
 	output := make(Set[string])
-	seen := make(Set[string])
 	var working string
-	_permutations(input, mask, working, seen, output)
+
+	if len(known) == len(mask) {
+		seen := make(Set[string])
+		_permutations(known, mask, working, seen, output)
+		return output
+	}
+
+	knownRunes := []rune(known)
+	maybeRunes := []rune(maybe)
+	if len(known) == len(mask)-1 {
+		for _, r := range knownRunes {
+			seen := make(Set[string])
+			_permutations(string(append(knownRunes, r)), mask, working, seen, output)
+		}
+		for _, r := range maybeRunes {
+			seen := make(Set[string])
+			_permutations(string(append(knownRunes, r)), mask, working, seen, output)
+		}
+	}
 	return output
 }
 
