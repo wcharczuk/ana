@@ -49,3 +49,29 @@ func Test_chose_one(t *testing.T) {
 		t.Fatalf("expected 5 results, got %d", len(results))
 	}
 }
+
+func Test_choseAny(t *testing.T) {
+	results := chooseAny([]rune("abcde"), 3)
+	if len(results) == 0 {
+		t.Fatal("results are empty")
+	}
+	if len(results) != 125 {
+		for _, r := range results {
+			t.Log(string(r))
+		}
+		t.Fatalf("expected 125 results, got %d", len(results))
+	}
+}
+
+func Test_choseAny_one(t *testing.T) {
+	results := chooseAny([]rune("abcde"), 1)
+	if len(results) == 0 {
+		t.Fatal("results are empty")
+	}
+	if len(results) != 5 {
+		for _, r := range results {
+			t.Log(string(r))
+		}
+		t.Fatalf("expected 5 results, got %d", len(results))
+	}
+}

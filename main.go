@@ -147,7 +147,7 @@ func permutations(known, maybe, mask string) Set[string] {
 	missing := len(maskRunes) - len(knownRunes)
 
 	maybeRunes = concat(maybeRunes, knownRunes...)
-	for _, adds := range choose(maybeRunes, missing) {
+	for _, adds := range chooseAny(maybeRunes, missing) {
 		results := _permutations(concat(knownRunes, adds...), 0, maskRunes, nil)
 		for _, res := range results {
 			output.Add(res)
@@ -220,6 +220,22 @@ func choose(input []rune, count int) (output [][]rune) {
 		if len(w) == count {
 			output = append(output, w)
 		}
+	}
+	return
+}
+
+func chooseAny(input []rune, count int) [][]rune {
+	return _chooseAny(input, count, nil)
+}
+
+func _chooseAny(input []rune, count int, working []rune) (output [][]rune) {
+	if len(working) == count {
+		return [][]rune{working}
+	}
+	for _, r := range input {
+		output = append(output,
+			_chooseAny(input, count, concat(working, r))...,
+		)
 	}
 	return
 }
