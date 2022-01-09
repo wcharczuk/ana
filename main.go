@@ -19,6 +19,9 @@ func main() {
 	var flagKnown = flag.String("known", "", "The known letter set")
 	var flagMaybe = flag.String("maybe", "", "The maybe letter set")
 
+	var flagAnalyze = flag.Bool("analyze", false, "If we should print analysis results")
+	var flagPermutations = flag.Bool("permutations", false, "If we should show permutations")
+
 	oldUsage := flag.Usage
 	flag.Usage = func() {
 		fmt.Printf("ana [flags]")
@@ -26,13 +29,28 @@ func main() {
 	}
 	flag.Parse()
 
+	if *flagAnalyze {
+		fmt.Println("analyze mode")
+		return
+	}
+
 	var inputPermutations Set[string]
 	if *flagKnown != "" {
 		inputPermutations = permutations(*flagKnown, *flagMaybe, *flagMask)
 	}
 
+	if *flagPermutations {
+		fmt.Printf("yielded %d permutations:\n", len(inputPermutations))
+		for w := range inputPermutations {
+			fmt.Println(w)
+		}
+		fmt.Println("---")
+	}
+
 	dictFile := getDictionaryReader(*flagDictPath)
 	defer dictFile.Close()
+
+	mask := []rune(*flagMask)
 
 	dictScanner := bufio.NewScanner(dictFile)
 	var dictWord string
@@ -41,7 +59,7 @@ func main() {
 		if inputPermutations != nil && !inputPermutations.Has(dictWord) {
 			continue
 		}
-		if *flagMask != "" && !matchesPositionMask(*flagMask, dictWord) {
+		if !matchesPositionMask(mask, []rune(dictWord)) {
 			continue
 		}
 		fmt.Println(dictWord)
@@ -70,22 +88,21 @@ func getDictionaryReader(dictPath string) io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(dictionary))
 }
 
-func matchesPositionMask(mask, input string) bool {
-	if mask == "" && input == "" {
+func matchesPositionMask(mask, input []rune) bool {
+	if len(mask) == 0 && len(input) == 0 {
 		return false
 	}
-	if mask == "" && input != "" {
+	if len(mask) == 0 && len(input) > 0 {
 		return true
 	}
 	if len(mask) != len(input) {
 		return false
 	}
-	maskRunes := []rune(mask)
 	for index, r := range input {
-		if maskRunes[index] == '?' {
+		if mask[index] == '?' {
 			continue
 		}
-		if maskRunes[index] != r {
+		if mask[index] != r {
 			return false
 		}
 	}
@@ -93,69 +110,90 @@ func matchesPositionMask(mask, input string) bool {
 }
 
 func permutations(known, maybe, mask string) Set[string] {
-	output := make(Set[string])
-	var working string
-
-	if len(known) == len(mask) {
-		seen := make(Set[string])
-		_permutations(known, mask, working, seen, output)
-		return output
-	}
-
 	knownRunes := []rune(known)
 	maybeRunes := []rune(maybe)
-	if len(known) == len(mask)-1 {
-		for _, r := range knownRunes {
-			seen := make(Set[string])
-			_permutations(string(append(knownRunes, r)), mask, working, seen, output)
-		}
-		for _, r := range maybeRunes {
-			seen := make(Set[string])
-			_permutations(string(append(knownRunes, r)), mask, working, seen, output)
+	maskRunes := []rune(mask)
+	if len(knownRunes) == len(maskRunes) {
+		return NewSet(_permutations(knownRunes, 0, maskRunes, nil))
+	}
+
+	output := make(Set[string])
+	missing := len(maskRunes) - len(knownRunes)
+
+	maybeRunes = concat(maybeRunes, knownRunes...)
+	for _, adds := range choose(maybeRunes, missing) {
+		results := _permutations(concat(knownRunes, adds...), 0, maskRunes, nil)
+		for _, res := range results {
+			output.Add(res)
 		}
 	}
 	return output
 }
 
-func _permutations(input, mask, working string, seen, output Set[string]) {
-	if len(input) == 0 {
-		if mask != "" && matchesPositionMask(mask, string(working)) {
-			output.Add(string(working))
-		}
+func _permutations(input []rune, index int, mask, working []rune) (output []string) {
+	if index == len(input) && matchesPositionMask(mask, working) {
+		output = []string{string(working)}
 		return
 	}
-	for index, c := range input {
-		before := string(c) + working
-		if !seen.Has(before) {
-			seen.Add(before)
-			_permutations(
-				removeAt(input, index),
-				mask,
-				before,
-				seen,
-				output,
-			)
-		}
-		after := working + string(c)
-		if !seen.Has(after) {
-			seen.Add(after)
-			_permutations(
-				removeAt(input, index),
-				mask,
-				after,
-				seen,
-				output,
-			)
-		}
+
+	c := input[index]
+	for x := 0; x <= len(working); x++ {
+		output = append(output,
+			_permutations(input, index+1, mask, insertAt(working, c, x))...,
+		)
 	}
+	return
 }
 
-func removeAt(input string, index int) string {
-	if input == "" {
-		return ""
+func insertAt(input []rune, r rune, index int) []rune {
+	output := make([]rune, len(input)+1)
+	if index > 0 {
+		copy(output[:index], input[:index])
 	}
-	inputRunes := []rune(input)
-	return string(append(inputRunes[:index], inputRunes[index+1:]...))
+	output[index] = r
+	if index < len(input) {
+		copy(output[index+1:], input[index:])
+	}
+	return output
+}
+
+func concat(a []rune, b ...rune) []rune {
+	output := make([]rune, 0, len(a)+len(b))
+	for _, r := range a {
+		output = append(output, r)
+	}
+	for _, r := range b {
+		output = append(output, r)
+	}
+	return output
+}
+
+func choose(input []rune, count int) (output [][]rune) {
+	max := 1 << len(input)
+
+	for x := 0; x < max; x++ {
+		var index int
+		var w []rune
+		for y := x; y > 0; y >>= 1 {
+			if (y & 1) == 1 {
+				w = append(w, input[index])
+			}
+			index++
+		}
+		if len(w) == count {
+			output = append(output, w)
+		}
+	}
+	return
+}
+
+// NewSet creates a new set.
+func NewSet[A comparable](values []A) Set[A] {
+	s := make(Set[A])
+	for _, v := range values {
+		s.Add(v)
+	}
+	return s
 }
 
 type Set[A comparable] map[A]struct{}
