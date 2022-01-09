@@ -13,14 +13,15 @@ import (
 //go:embed dictionary.txt
 var dictionary []byte
 
+var alphabet = []rune("abcdefghijklmnopqrstuvwxyz")
+
 func main() {
 	var flagDictPath = flag.String("dict", "", "The dictionary path (optional, will use embedded dictionary by default)")
 	var flagMask = flag.String("mask", "?????", "If we should match a position mask (e.g. ?i?e??)")
 	var flagKnown = flag.String("known", "", "The known letter set")
-	var flagMaybe = flag.String("maybe", "", "The maybe letter set")
+	var flagExclude = flag.String("exclude", "", "The excluded letter set")
 	var flagAnalyze = flag.Bool("analyze", false, "If we should print analysis results")
 	var flagLimit = flag.Int("limit", 0, "If we should limit results")
-	var flagVerbose = flag.Bool("verbose", false, "If we should show verbose output")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -31,25 +32,25 @@ func main() {
 
 	dict := getDictionary(*flagDictPath)
 
-	var inputPermutations Set[string]
-	if *flagKnown != "" {
-		inputPermutations = permutations(*flagKnown, *flagMaybe, *flagMask)
+	exclude := NewSet([]rune(*flagExclude))
+	var maybe []rune
+	for _, c := range alphabet {
+		if !exclude.Has(c) {
+			maybe = append(maybe, c)
+		}
 	}
 
-	if *flagVerbose {
-		fmt.Println("permutations")
-		for w := range inputPermutations {
-			fmt.Println(w)
-		}
-		fmt.Println("---")
-		fmt.Println("dictionary:", len(dict), "words")
+	var inputPermutations Set[string]
+	if *flagKnown != "" {
+		inputPermutations = permutations(*flagKnown, string(maybe), *flagMask)
 	}
 
 	mask := []rune(*flagMask)
 
+	analyzeDict := make(Set[string])
 	analyzeResults := &Heap[WordStats]{
 		Less: func(a, b WordStats) bool {
-			return a.Green > b.Green
+			return (a.Green + a.Yellow) > (b.Green + b.Yellow)
 		},
 	}
 
@@ -62,7 +63,7 @@ func main() {
 			continue
 		}
 		if *flagAnalyze {
-			analyzeResults.Push(analyze(dict, dictWord))
+			analyzeDict.Add(dictWord)
 		} else {
 			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
 				fmt.Println(dictWord)
@@ -71,6 +72,9 @@ func main() {
 		}
 	}
 	if *flagAnalyze {
+		for word := range analyzeDict {
+			analyzeResults.Push(analyze(analyzeDict, word))
+		}
 		for _, ws := range analyzeResults.Values {
 			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
 				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
