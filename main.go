@@ -170,11 +170,20 @@ func concat(a []rune, b ...rune) []rune {
 
 func choose(input []rune, count int) (output [][]rune) {
 	max := 1 << len(input)
-
 	for x := 0; x < max; x++ {
 		var index int
 		var w []rune
+
+		// start with all the bits of x
+		// we only consider up to x
+		// because left of x's value will be zeros
 		for y := x; y > 0; y >>= 1 {
+			// test if the _last_ bit is on
+			// or off, if it's on, add the char
+			// we do this with the value (1)
+			// instead of all ones
+			// if 1011 & 1 == 1, then the
+			// last bit was one
 			if (y & 1) == 1 {
 				w = append(w, input[index])
 			}
