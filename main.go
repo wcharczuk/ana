@@ -18,9 +18,8 @@ func main() {
 	var flagMask = flag.String("mask", "?????", "If we should match a position mask (e.g. ?i?e??)")
 	var flagKnown = flag.String("known", "", "The known letter set")
 	var flagMaybe = flag.String("maybe", "", "The maybe letter set")
-
 	var flagAnalyze = flag.Bool("analyze", false, "If we should print analysis results")
-	var flagPermutations = flag.Bool("permutations", false, "If we should show permutations")
+	var flagLimit = flag.Int("limit", 0, "If we should limit results")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -29,40 +28,45 @@ func main() {
 	}
 	flag.Parse()
 
-	if *flagAnalyze {
-		fmt.Println("analyze mode")
-		return
-	}
+	dict := getDictionary(*flagDictPath)
 
 	var inputPermutations Set[string]
 	if *flagKnown != "" {
 		inputPermutations = permutations(*flagKnown, *flagMaybe, *flagMask)
 	}
 
-	if *flagPermutations {
-		fmt.Printf("yielded %d permutations:\n", len(inputPermutations))
-		for w := range inputPermutations {
-			fmt.Println(w)
-		}
-		fmt.Println("---")
-	}
-
-	dictFile := getDictionaryReader(*flagDictPath)
-	defer dictFile.Close()
-
 	mask := []rune(*flagMask)
 
-	dictScanner := bufio.NewScanner(dictFile)
-	var dictWord string
-	for dictScanner.Scan() {
-		dictWord = dictScanner.Text()
+	analyzeResults := &Heap[WordStats]{
+		Less: func(a, b WordStats) bool {
+			return a.Green > b.Green
+		},
+	}
+
+	var count int
+	for dictWord := range dict {
 		if inputPermutations != nil && !inputPermutations.Has(dictWord) {
 			continue
 		}
 		if !matchesPositionMask(mask, []rune(dictWord)) {
 			continue
 		}
-		fmt.Println(dictWord)
+		if *flagAnalyze {
+			analyzeResults.Push(analyze(dict, dictWord))
+		} else {
+			if *flagLimit > 0 && count < *flagLimit {
+				fmt.Println(dictWord)
+			}
+			count++
+		}
+	}
+	if *flagAnalyze {
+		for _, ws := range analyzeResults.Values {
+			if *flagLimit > 0 && count < *flagLimit {
+				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
+			}
+			count++
+		}
 	}
 }
 
@@ -77,6 +81,18 @@ func fatal(err error) {
 		fmt.Fprintf(os.Stderr, "fatal: %+v\n", err)
 		os.Exit(1)
 	}
+}
+
+func getDictionary(dictPath string) Set[string] {
+	r := getDictionaryReader(dictPath)
+	defer r.Close()
+
+	output := make(Set[string])
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		output.Add(scanner.Text())
+	}
+	return output
 }
 
 func getDictionaryReader(dictPath string) io.ReadCloser {
@@ -196,6 +212,47 @@ func choose(input []rune, count int) (output [][]rune) {
 	return
 }
 
+func analyze(dict Set[string], word string) (output WordStats) {
+	output.Word = word
+	for w := range dict {
+		if w == word {
+			continue
+		}
+		green, yellow, miss := analyzeScore(w, word)
+		output.Green += green
+		output.Yellow += yellow
+		output.Miss += miss
+	}
+	return
+}
+
+func analyzeScore(w0, w1 string) (green, yellow, miss int) {
+	w0r := []rune(w0)
+	w0s := NewSet(w0r)
+	w1r := []rune(w1)
+
+	for x := 0; x < len(w0r); x++ {
+		if w0r[x] == w1r[x] {
+			green++
+			continue
+		}
+		if w0s.Has(w1r[x]) {
+			yellow++
+			continue
+		}
+		miss++
+		continue
+	}
+	return
+}
+
+type WordStats struct {
+	Word   string
+	Green  int
+	Yellow int
+	Miss   int
+}
+
 // NewSet creates a new set.
 func NewSet[A comparable](values []A) Set[A] {
 	s := make(Set[A])
@@ -209,3 +266,132 @@ type Set[A comparable] map[A]struct{}
 
 func (s Set[A]) Add(v A)           { s[v] = struct{}{} }
 func (s Set[A]) Has(v A) (ok bool) { _, ok = s[v]; return }
+
+// Heap is a generic priority queue.
+//
+// You must provide a `Less(...) bool` function, but values can be omitted.
+type Heap[A any] struct {
+	Values []A
+	Less   func(A, A) bool
+}
+
+// OkValue returns just the value from a (A,bool) return.
+func OkValue[A any](v A, ok bool) A {
+	return v
+}
+
+// Init establishes the heap invariants required by the other routines in this package.
+// Init is idempotent with respect to the heap invariants
+// and may be called whenever the heap invariants may have been invalidated.
+// The complexity is O(n) where n = h.Len().
+func (h *Heap[A]) Init() {
+	n := len(h.Values)
+	for i := n/2 - 1; i >= 0; i-- {
+		h.down(i, n)
+	}
+}
+
+// Len returns the length, or number of items in the heap.
+func (h *Heap[A]) Len() int {
+	return len(h.Values)
+}
+
+// Push pushes values onto the heap.
+func (h *Heap[A]) Push(v A) {
+	h.Values = append(h.Values, v)
+	h.up(len(h.Values) - 1)
+}
+
+// Peek returns the first (smallest) element in the heap.
+func (h *Heap[A]) Peek() (output A, ok bool) {
+	if len(h.Values) == 0 {
+		return
+	}
+	output = h.Values[0]
+	ok = true
+	return
+}
+
+// Pop removes and returns the minimum element (according to Less) from the heap.
+// The complexity is O(log n) where n = h.Len().
+// Pop is equivalent to Remove(h, 0).
+func (h *Heap[A]) Pop() (output A, ok bool) {
+	if len(h.Values) == 0 {
+		return
+	}
+
+	// heap pop
+	n := len(h.Values) - 1
+	h.swap(0, n)
+	h.down(0, n)
+
+	// intheap pop
+	old := h.Values
+	n = len(old)
+	output = old[n-1]
+	ok = true
+	h.Values = old[0 : n-1]
+	return
+}
+
+// Fix re-establishes the heap ordering after the element at index i has changed its value.
+// Changing the value of the element at index i and then calling Fix is equivalent to,
+// but less expensive than, calling Remove(h, i) followed by a Push of the new value.
+// The complexity is O(log n) where n = h.Len().
+func (h *Heap[A]) Fix(i int) {
+	if !h.down(i, len(h.Values)) {
+		h.up(i)
+	}
+}
+
+// Remove removes and returns the element at index i from the heap.
+// The complexity is O(log n) where n = h.Len().
+func (h *Heap[A]) Remove(i int) (output A, ok bool) {
+	n := len(h.Values) - 1
+	if n != i {
+		h.swap(i, n)
+		if !h.down(i, n) {
+			h.up(i)
+		}
+	}
+	return h.Pop()
+}
+
+//
+// internal helpers
+//
+
+func (h *Heap[A]) swap(i, j int) {
+	h.Values[i], h.Values[j] = h.Values[j], h.Values[i]
+}
+
+func (h *Heap[A]) up(j int) {
+	for {
+		i := (j - 1) / 2 // parent
+		if i == j || !h.Less(h.Values[j], h.Values[i]) {
+			break
+		}
+		h.swap(i, j)
+		j = i
+	}
+}
+
+func (h *Heap[A]) down(i0, n int) bool {
+	i := i0
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
+			break
+		}
+		j := j1 // left child
+		if j2 := j1 + 1; j2 < n && h.Less(h.Values[j2], h.Values[j1]) {
+			j = j2 // = 2*i + 2  // right child
+		}
+		if !h.Less(h.Values[j], h.Values[i]) {
+			break
+		}
+		h.swap(i, j)
+		i = j
+	}
+	return i > i0
+}
