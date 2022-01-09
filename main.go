@@ -20,6 +20,7 @@ func main() {
 	var flagMaybe = flag.String("maybe", "", "The maybe letter set")
 	var flagAnalyze = flag.Bool("analyze", false, "If we should print analysis results")
 	var flagLimit = flag.Int("limit", 0, "If we should limit results")
+	var flagVerbose = flag.Bool("verbose", false, "If we should show verbose output")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -33,6 +34,15 @@ func main() {
 	var inputPermutations Set[string]
 	if *flagKnown != "" {
 		inputPermutations = permutations(*flagKnown, *flagMaybe, *flagMask)
+	}
+
+	if *flagVerbose {
+		fmt.Println("permutations")
+		for w := range inputPermutations {
+			fmt.Println(w)
+		}
+		fmt.Println("---")
+		fmt.Println("dictionary:", len(dict), "words")
 	}
 
 	mask := []rune(*flagMask)
@@ -54,18 +64,18 @@ func main() {
 		if *flagAnalyze {
 			analyzeResults.Push(analyze(dict, dictWord))
 		} else {
-			if *flagLimit > 0 && count < *flagLimit {
+			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
 				fmt.Println(dictWord)
+				count++
 			}
-			count++
 		}
 	}
 	if *flagAnalyze {
 		for _, ws := range analyzeResults.Values {
-			if *flagLimit > 0 && count < *flagLimit {
+			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
 				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
+				count++
 			}
-			count++
 		}
 	}
 }
@@ -147,8 +157,10 @@ func permutations(known, maybe, mask string) Set[string] {
 }
 
 func _permutations(input []rune, index int, mask, working []rune) (output []string) {
-	if index == len(input) && matchesPositionMask(mask, working) {
-		output = []string{string(working)}
+	if index == len(input) {
+		if matchesPositionMask(mask, working) {
+			output = []string{string(working)}
+		}
 		return
 	}
 
