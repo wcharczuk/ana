@@ -8,16 +8,12 @@ LICENSE file at the root of the repository.
 
 package collections
 
-import (
-	"constraints"
-)
-
 // BinarySearchTree is a AVL balanced tree which holds the properties
 // that nodes are ordered left to right.
 //
 // The choice to use AVL to balance the tree means the use cases skew
 // towards fast lookups at the expense of more costly mutations.
-type BinarySearchTree[K constraints.Ordered, V any] struct {
+type BinarySearchTree[K Ordered, V any] struct {
 	root *BinarySearchTreeNode[K, V]
 }
 
@@ -300,7 +296,7 @@ func (bst *BinarySearchTree[K, V]) _keysEqual(a, b *BinarySearchTreeNode[K, V]) 
 }
 
 // BinarySearchTreeNode is a node in a BinarySearchTree.
-type BinarySearchTreeNode[K constraints.Ordered, V any] struct {
+type BinarySearchTreeNode[K Ordered, V any] struct {
 	Key    K
 	Value  V
 	Left   *BinarySearchTreeNode[K, V]
@@ -308,7 +304,7 @@ type BinarySearchTreeNode[K constraints.Ordered, V any] struct {
 	Height int
 }
 
-func max[K constraints.Ordered](keys ...K) (k K) {
+func max[K Ordered](keys ...K) (k K) {
 	if len(keys) == 0 {
 		return
 	}

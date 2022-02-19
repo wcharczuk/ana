@@ -1,4 +1,2 @@
-github.com/wcharczuk/extlib v0.0.0-20220219200537-5657ed8eb921 h1:pAWI9xg9x8TLK/ngbhE0+O9vlDNzhktH4a8idzOo5A8=
-github.com/wcharczuk/extlib v0.0.0-20220219200537-5657ed8eb921/go.mod h1:p9JFx6jND3XkyuUxzkK8FDv363jiyl4lytKebmufLKE=
-github.com/wcharczuk/extlib v0.0.0-20220219202231-846f87b87fb6 h1:kc2J8pfi5Hje0sExXI77Gq2t81F/IV9lfC1Sd3cy72s=
-github.com/wcharczuk/extlib v0.0.0-20220219202231-846f87b87fb6/go.mod h1:p9JFx6jND3XkyuUxzkK8FDv363jiyl4lytKebmufLKE=
+github.com/wcharczuk/extlib v0.0.0-20220219221337-7367491ce384 h1:p7v7VJvinlmirpC7X44J8b2D0QAAv9WsXoEXUeOL6sE=
+github.com/wcharczuk/extlib v0.0.0-20220219221337-7367491ce384/go.mod h1:p9JFx6jND3XkyuUxzkK8FDv363jiyl4lytKebmufLKE=

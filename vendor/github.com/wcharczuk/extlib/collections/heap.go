@@ -8,8 +8,6 @@ LICENSE file at the root of the repository.
 
 package collections
 
-import "constraints"
-
 // NewHeap returns a new heap.
 func NewHeap[A any](lessfn func(A, A) bool, values ...A) *Heap[A] {
 	h := &Heap[A]{
@@ -37,12 +35,12 @@ type Heap[A any] struct {
 }
 
 // MinLess returns a simple less function for ordered types.
-func MinLess[A constraints.Ordered](i, j A) bool {
+func MinLess[A Ordered](i, j A) bool {
 	return i < j
 }
 
 // MaxLess returns a simple less function for ordered types.
-func MaxLess[A constraints.Ordered](i, j A) bool {
+func MaxLess[A Ordered](i, j A) bool {
 	return i > j
 }
 

@@ -8,16 +8,12 @@ LICENSE file at the root of the repository.
 
 package collections
 
-import (
-	"constraints"
-)
-
 // Search uses a binary search to find the smallest index within the values
 // such that the value at that index is >= the value.
 //
 // The return value is the index to insert x if x is not
 // present (it could be len(a)).
-func Search[A constraints.Ordered](values []A, value A) int {
+func Search[A Ordered](values []A, value A) int {
 	// Define f(-1) == false and f(n) == true.
 	// Invariant: f(i-1) == false, f(j) == true.
 	i, j := 0, len(values)

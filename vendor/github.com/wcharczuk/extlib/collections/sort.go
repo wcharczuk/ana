@@ -9,7 +9,6 @@ LICENSE file at the root of the repository.
 package collections
 
 import (
-	"constraints"
 	"sort"
 )
 
@@ -32,7 +31,7 @@ func Sort[T any](elems []T, comparers ...SorterComparer[T]) {
 }
 
 // SortAsc is an identity sort ascending.
-func SortAsc[T constraints.Ordered]() SorterComparer[T] {
+func SortAsc[T Ordered]() SorterComparer[T] {
 	return SorterComparerFunc[T](func(i, j T) int {
 		switch {
 		case i == j:
@@ -46,7 +45,7 @@ func SortAsc[T constraints.Ordered]() SorterComparer[T] {
 }
 
 // SortDesc is an identity sort descending.
-func SortDesc[T constraints.Ordered]() SorterComparer[T] {
+func SortDesc[T Ordered]() SorterComparer[T] {
 	return SorterComparerFunc[T](func(i, j T) int {
 		switch {
 		case i == j:
@@ -60,7 +59,7 @@ func SortDesc[T constraints.Ordered]() SorterComparer[T] {
 }
 
 // SortKey is a sort comparer that extracts a key and sorts by it ascending.
-func SortKey[T any, V constraints.Ordered](fn func(T) V) SorterComparer[T] {
+func SortKey[T any, V Ordered](fn func(T) V) SorterComparer[T] {
 	return SorterComparerFunc[T](func(i, j T) int {
 		iv := fn(i)
 		jv := fn(j)
@@ -76,7 +75,7 @@ func SortKey[T any, V constraints.Ordered](fn func(T) V) SorterComparer[T] {
 }
 
 // SortKeyDesc is a sort comparer that extracts a key and sorts by it descending.
-func SortKeyDesc[T any, V constraints.Ordered](fn func(T) V) SorterComparer[T] {
+func SortKeyDesc[T any, V Ordered](fn func(T) V) SorterComparer[T] {
 	return SorterComparerFunc[T](func(i, j T) int {
 		iv := fn(i)
 		jv := fn(j)
