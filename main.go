@@ -77,7 +77,7 @@ func action(c *cli.Context) error {
 	mask := []rune(c.String("mask"))
 	analyzeDict := make(collections.Set[string])
 	analyzeResults := &collections.Heap[WordStats]{
-		Less: func(a, b WordStats) bool {
+		LessFn: func(a, b WordStats) bool {
 			return (a.Green + a.Yellow) > (b.Green + b.Yellow)
 		},
 	}
