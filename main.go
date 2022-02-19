@@ -78,12 +78,9 @@ func action(ctx *cli.Context) error {
 
 	fmt.Printf("using alphabet: %s\n", string(maybe))
 	fmt.Printf("using knowns: %s\n", known)
-	fmt.Printf("using mask: %s\n", known)
+	fmt.Printf("using mask: %s\n", mask)
 
-	var knownPermutations collections.Set[string]
-	if known != "" {
-		knownPermutations = permutations(known, string(maybe), mask)
-	}
+	knownPermutations := permutations(known, string(maybe), mask)
 
 	maskRunes := []rune(mask)
 	analyzeDict := make(collections.Set[string])
@@ -188,6 +185,10 @@ func matchesPositionMask(mask, input []rune) bool {
 }
 
 func permutations(known, maybe, mask string) collections.Set[string] {
+	if known == "" {
+		return nil
+	}
+
 	knownRunes := []rune(known)
 	maybeRunes := []rune(maybe)
 	maskRunes := []rune(mask)
@@ -196,10 +197,9 @@ func permutations(known, maybe, mask string) collections.Set[string] {
 	}
 
 	output := make(collections.Set[string])
-	missing := len(maybeRunes) - len(knownRunes)
+	missing := 5 - len(knownRunes)
 
-	searchRunes := concat(maybeRunes, knownRunes...)
-	for _, adds := range chooseAny(searchRunes, missing) {
+	for _, adds := range chooseAny(maybeRunes, missing) {
 		results := _permutations(concat(knownRunes, adds...), 0, maskRunes, nil)
 		for _, res := range results {
 			output.Add(res)
@@ -276,18 +276,22 @@ func chooseAny(input []rune, count int) [][]rune {
 	if count <= 0 {
 		return nil
 	}
-	return _chooseAny(input, count, nil)
+	return _chooseAny(input, count, 0, nil)
 }
 
-func _chooseAny(input []rune, count int, working []rune) (output [][]rune) {
+func _chooseAny(input []rune, count, index int, working []rune) (output [][]rune) {
 	if len(working) == count {
 		return [][]rune{working}
 	}
-	for _, r := range input {
-		output = append(output,
-			_chooseAny(input, count, concat(working, r))...,
-		)
+	if index == len(input) {
+		return nil
 	}
+	output = append(output,
+		_chooseAny(input, count, index+1, concat(working, input[index]))...,
+	)
+	output = append(output,
+		_chooseAny(input, count, index+1, working)...,
+	)
 	return
 }
 
