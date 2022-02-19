@@ -33,6 +33,10 @@ var app = &cli.App{
 			Usage: "The position mask to match (e.g. ?i?e??)",
 		},
 		&cli.StringFlag{
+			Name:  "known",
+			Usage: "The known letter set",
+		},
+		&cli.StringFlag{
 			Name:  "exclude",
 			Usage: "The excluded letter set",
 		},
@@ -55,13 +59,13 @@ func main() {
 	}
 }
 
-func action(c *cli.Context) error {
-	dict, err := getDictionary(c.String("dict"))
+func action(ctx *cli.Context) error {
+	dict, err := getDictionary(ctx.String("dict"))
 	if err != nil {
 		return err
 	}
 
-	exclude := collections.NewSet([]rune(c.String("exclude")))
+	exclude := collections.NewSet([]rune(ctx.String("exclude")))
 	var maybe []rune
 	for _, c := range alphabet {
 		if !exclude.Has(c) {
@@ -69,42 +73,56 @@ func action(c *cli.Context) error {
 		}
 	}
 
-	var inputPermutations collections.Set[string]
-	if flagKnown := c.String("exclude"); flagKnown != "" {
-		inputPermutations = permutations(flagKnown, string(maybe), c.String("mask"))
+	known := ctx.String("known")
+	mask := ctx.String("mask")
+
+	fmt.Printf("using alphabet: %s\n", string(maybe))
+	fmt.Printf("using knowns: %s\n", known)
+	fmt.Printf("using mask: %s\n", known)
+
+	var knownPermutations collections.Set[string]
+	if known != "" {
+		knownPermutations = permutations(known, string(maybe), mask)
 	}
 
-	mask := []rune(c.String("mask"))
+	maskRunes := []rune(mask)
 	analyzeDict := make(collections.Set[string])
 	analyzeResults := &collections.Heap[WordStats]{
 		LessFn: func(a, b WordStats) bool {
+			if a.UniqueLetters > b.UniqueLetters {
+				return true
+			}
 			return (a.Green + a.Yellow) > (b.Green + b.Yellow)
 		},
 	}
 
 	var count int
 	for dictWord := range dict {
-		if inputPermutations != nil && !inputPermutations.Has(dictWord) {
+		if knownPermutations != nil && !knownPermutations.Has(dictWord) {
 			continue
 		}
-		if !matchesPositionMask(mask, []rune(dictWord)) {
+		if !matchesPositionMask(maskRunes, []rune(dictWord)) {
 			continue
 		}
-		if c.Bool("analyze") {
+		if excludeMatches(exclude, []rune(dictWord)) {
+			continue
+		}
+		if ctx.Bool("analyze") {
 			analyzeDict.Add(dictWord)
 		} else {
-			if flagLimit := c.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
+			if flagLimit := ctx.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
 				fmt.Println(dictWord)
 				count++
 			}
 		}
 	}
-	if c.Bool("analyze") {
+
+	if ctx.Bool("analyze") {
 		for word := range analyzeDict {
 			analyzeResults.Push(analyze(analyzeDict, word))
 		}
 		for _, ws := range analyzeResults.Values {
-			if flagLimit := c.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
+			if flagLimit := ctx.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
 				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
 				count++
 			}
@@ -139,6 +157,15 @@ func getDictionaryReader(dictPath string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(dictionary)), nil
 }
 
+func excludeMatches(excludes collections.Set[rune], wordRunes []rune) bool {
+	for _, r := range wordRunes {
+		if excludes.Has(r) {
+			return true
+		}
+	}
+	return false
+}
+
 func matchesPositionMask(mask, input []rune) bool {
 	if len(mask) == 0 && len(input) == 0 {
 		return false
@@ -169,10 +196,10 @@ func permutations(known, maybe, mask string) collections.Set[string] {
 	}
 
 	output := make(collections.Set[string])
-	missing := len(maskRunes) - len(knownRunes)
+	missing := len(maybeRunes) - len(knownRunes)
 
-	maybeRunes = concat(maybeRunes, knownRunes...)
-	for _, adds := range chooseAny(maybeRunes, missing) {
+	searchRunes := concat(maybeRunes, knownRunes...)
+	for _, adds := range chooseAny(searchRunes, missing) {
 		results := _permutations(concat(knownRunes, adds...), 0, maskRunes, nil)
 		for _, res := range results {
 			output.Add(res)
@@ -246,6 +273,9 @@ func choose(input []rune, count int) (output [][]rune) {
 }
 
 func chooseAny(input []rune, count int) [][]rune {
+	if count <= 0 {
+		return nil
+	}
 	return _chooseAny(input, count, nil)
 }
 
@@ -263,11 +293,14 @@ func _chooseAny(input []rune, count int, working []rune) (output [][]rune) {
 
 func analyze(dict collections.Set[string], word string) (output WordStats) {
 	output.Word = word
-	for w := range dict {
-		if w == word {
+	wordRunes := []rune(word)
+	wordRuneSet := collections.NewSet(wordRunes)
+	output.UniqueLetters = len(wordRuneSet)
+	for dictionaryWord := range dict {
+		if word == dictionaryWord {
 			continue
 		}
-		green, yellow, miss := analyzeScore(w, word)
+		green, yellow, miss := compareWords(wordRunes, wordRuneSet, dictionaryWord)
 		output.Green += green
 		output.Yellow += yellow
 		output.Miss += miss
@@ -275,17 +308,14 @@ func analyze(dict collections.Set[string], word string) (output WordStats) {
 	return
 }
 
-func analyzeScore(w0, w1 string) (green, yellow, miss int) {
-	w0r := []rune(w0)
-	w0s := collections.NewSet(w0r)
-	w1r := []rune(w1)
-
-	for x := 0; x < len(w0r); x++ {
-		if w0r[x] == w1r[x] {
+func compareWords(sourceWordRunes []rune, sourceWordRuneSet collections.Set[rune], guessWord string) (green, yellow, miss int) {
+	guessWordRunes := []rune(guessWord)
+	for x := 0; x < len(guessWordRunes); x++ {
+		if sourceWordRunes[x] == guessWordRunes[x] {
 			green++
 			continue
 		}
-		if w0s.Has(w1r[x]) {
+		if sourceWordRuneSet.Has(guessWordRunes[x]) {
 			yellow++
 			continue
 		}
@@ -296,8 +326,9 @@ func analyzeScore(w0, w1 string) (green, yellow, miss int) {
 }
 
 type WordStats struct {
-	Word   string
-	Green  int
-	Yellow int
-	Miss   int
+	Word          string
+	UniqueLetters int
+	Green         int
+	Yellow        int
+	Miss          int
 }

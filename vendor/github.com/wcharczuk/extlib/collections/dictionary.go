@@ -1,7 +1,7 @@
 /*
 
 Copyright (c) 2022 - Present. Will Charczuk. All rights reserved.
-Use of this source code is governed by a MIT license that can be found in the 
+Use of this source code is governed by a MIT license that can be found in the
 LICENSE file at the root of the repository.
 
 */

@@ -1,3 +1,11 @@
+/*
+
+Copyright (c) 2022 - Present. Will Charczuk. All rights reserved.
+Use of this source code is governed by a MIT license that can be found in the
+LICENSE file at the root of the repository.
+
+*/
+
 // Package cli provides a minimal framework for creating and organizing command line
 // Go applications. cli is designed to be easy to understand and write, the most simple
 // cli application can be written as follows:
