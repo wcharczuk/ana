@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	_ "embed"
-	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/wcharczuk/extlib/cli"
+	"github.com/wcharczuk/extlib/collections"
 )
 
 //go:embed dictionary.txt
@@ -15,24 +17,51 @@ var dictionary []byte
 
 var alphabet = []rune("abcdefghijklmnopqrstuvwxyz")
 
+var app = &cli.App{
+	Name:  "wordle",
+	Usage: "filter wordle dictionary words",
+	Action: func(c *cli.Context) error {
+		return action(c)
+	},
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "dict",
+			Usage: "The dictionary path (optional, will use embedded dictionary by default)",
+		},
+		&cli.StringFlag{
+			Name:  "mask",
+			Usage: "The position mask to match (e.g. ?i?e??)",
+		},
+		&cli.StringFlag{
+			Name:  "exclude",
+			Usage: "The excluded letter set",
+		},
+		&cli.BoolFlag{
+			Name:  "analyze",
+			Usage: "If we should analyze results",
+		},
+		&cli.IntFlag{
+			Name:  "limit",
+			Usage: "If we should limit results",
+		},
+	},
+}
+
 func main() {
-	var flagDictPath = flag.String("dict", "", "The dictionary path (optional, will use embedded dictionary by default)")
-	var flagMask = flag.String("mask", "?????", "If we should match a position mask (e.g. ?i?e??)")
-	var flagKnown = flag.String("known", "", "The known letter set")
-	var flagExclude = flag.String("exclude", "", "The excluded letter set")
-	var flagAnalyze = flag.Bool("analyze", false, "If we should print analysis results")
-	var flagLimit = flag.Int("limit", 0, "If we should limit results")
-
-	oldUsage := flag.Usage
-	flag.Usage = func() {
-		fmt.Printf("ana [flags]")
-		oldUsage()
+	err := app.Run(os.Args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%+v\n", err)
+		os.Exit(1)
 	}
-	flag.Parse()
+}
 
-	dict := getDictionary(*flagDictPath)
+func action(c *cli.Context) error {
+	dict, err := getDictionary(c.String("dict"))
+	if err != nil {
+		return err
+	}
 
-	exclude := NewSet([]rune(*flagExclude))
+	exclude := collections.NewSet([]rune(c.String("exclude")))
 	var maybe []rune
 	for _, c := range alphabet {
 		if !exclude.Has(c) {
@@ -40,15 +69,14 @@ func main() {
 		}
 	}
 
-	var inputPermutations Set[string]
-	if *flagKnown != "" {
-		inputPermutations = permutations(*flagKnown, string(maybe), *flagMask)
+	var inputPermutations collections.Set[string]
+	if flagKnown := c.String("exclude"); flagKnown != "" {
+		inputPermutations = permutations(flagKnown, string(maybe), c.String("mask"))
 	}
 
-	mask := []rune(*flagMask)
-
-	analyzeDict := make(Set[string])
-	analyzeResults := &Heap[WordStats]{
+	mask := []rune(c.String("mask"))
+	analyzeDict := make(collections.Set[string])
+	analyzeResults := &collections.Heap[WordStats]{
 		Less: func(a, b WordStats) bool {
 			return (a.Green + a.Yellow) > (b.Green + b.Yellow)
 		},
@@ -62,60 +90,53 @@ func main() {
 		if !matchesPositionMask(mask, []rune(dictWord)) {
 			continue
 		}
-		if *flagAnalyze {
+		if c.Bool("analyze") {
 			analyzeDict.Add(dictWord)
 		} else {
-			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
+			if flagLimit := c.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
 				fmt.Println(dictWord)
 				count++
 			}
 		}
 	}
-	if *flagAnalyze {
+	if c.Bool("analyze") {
 		for word := range analyzeDict {
 			analyzeResults.Push(analyze(analyzeDict, word))
 		}
 		for _, ws := range analyzeResults.Values {
-			if *flagLimit == 0 || (*flagLimit > 0 && count < *flagLimit) {
+			if flagLimit := c.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
 				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
 				count++
 			}
 		}
 	}
+	return nil
 }
 
-func usagef(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	flag.Usage()
-	os.Exit(1)
-}
-
-func fatal(err error) {
+func getDictionary(dictPath string) (collections.Set[string], error) {
+	r, err := getDictionaryReader(dictPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: %+v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
-}
-
-func getDictionary(dictPath string) Set[string] {
-	r := getDictionaryReader(dictPath)
 	defer r.Close()
 
-	output := make(Set[string])
+	output := make(collections.Set[string])
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		output.Add(scanner.Text())
 	}
-	return output
+	return output, err
 }
 
-func getDictionaryReader(dictPath string) io.ReadCloser {
+func getDictionaryReader(dictPath string) (io.ReadCloser, error) {
 	if dictPath != "" {
 		dictFile, err := os.Open(dictPath)
-		fatal(err)
-		return dictFile
+		if err != nil {
+			return nil, err
+		}
+		return dictFile, nil
 	}
-	return io.NopCloser(bytes.NewReader(dictionary))
+	return io.NopCloser(bytes.NewReader(dictionary)), nil
 }
 
 func matchesPositionMask(mask, input []rune) bool {
@@ -139,15 +160,15 @@ func matchesPositionMask(mask, input []rune) bool {
 	return true
 }
 
-func permutations(known, maybe, mask string) Set[string] {
+func permutations(known, maybe, mask string) collections.Set[string] {
 	knownRunes := []rune(known)
 	maybeRunes := []rune(maybe)
 	maskRunes := []rune(mask)
 	if len(knownRunes) == len(maskRunes) {
-		return NewSet(_permutations(knownRunes, 0, maskRunes, nil))
+		return collections.NewSet(_permutations(knownRunes, 0, maskRunes, nil))
 	}
 
-	output := make(Set[string])
+	output := make(collections.Set[string])
 	missing := len(maskRunes) - len(knownRunes)
 
 	maybeRunes = concat(maybeRunes, knownRunes...)
@@ -179,13 +200,9 @@ func _permutations(input []rune, index int, mask, working []rune) (output []stri
 
 func insertAt(input []rune, r rune, index int) []rune {
 	output := make([]rune, len(input)+1)
-	if index > 0 {
-		copy(output[:index], input[:index])
-	}
+	copy(output[:index], input[:index])
 	output[index] = r
-	if index < len(input) {
-		copy(output[index+1:], input[index:])
-	}
+	copy(output[index+1:], input[index:])
 	return output
 }
 
@@ -244,7 +261,7 @@ func _chooseAny(input []rune, count int, working []rune) (output [][]rune) {
 	return
 }
 
-func analyze(dict Set[string], word string) (output WordStats) {
+func analyze(dict collections.Set[string], word string) (output WordStats) {
 	output.Word = word
 	for w := range dict {
 		if w == word {
@@ -260,7 +277,7 @@ func analyze(dict Set[string], word string) (output WordStats) {
 
 func analyzeScore(w0, w1 string) (green, yellow, miss int) {
 	w0r := []rune(w0)
-	w0s := NewSet(w0r)
+	w0s := collections.NewSet(w0r)
 	w1r := []rune(w1)
 
 	for x := 0; x < len(w0r); x++ {
@@ -283,147 +300,4 @@ type WordStats struct {
 	Green  int
 	Yellow int
 	Miss   int
-}
-
-// NewSet creates a new set.
-func NewSet[A comparable](values []A) Set[A] {
-	s := make(Set[A])
-	for _, v := range values {
-		s.Add(v)
-	}
-	return s
-}
-
-type Set[A comparable] map[A]struct{}
-
-func (s Set[A]) Add(v A)           { s[v] = struct{}{} }
-func (s Set[A]) Has(v A) (ok bool) { _, ok = s[v]; return }
-
-// Heap is a generic priority queue.
-//
-// You must provide a `Less(...) bool` function, but values can be omitted.
-type Heap[A any] struct {
-	Values []A
-	Less   func(A, A) bool
-}
-
-// OkValue returns just the value from a (A,bool) return.
-func OkValue[A any](v A, ok bool) A {
-	return v
-}
-
-// Init establishes the heap invariants required by the other routines in this package.
-// Init is idempotent with respect to the heap invariants
-// and may be called whenever the heap invariants may have been invalidated.
-// The complexity is O(n) where n = h.Len().
-func (h *Heap[A]) Init() {
-	n := len(h.Values)
-	for i := n/2 - 1; i >= 0; i-- {
-		h.down(i, n)
-	}
-}
-
-// Len returns the length, or number of items in the heap.
-func (h *Heap[A]) Len() int {
-	return len(h.Values)
-}
-
-// Push pushes values onto the heap.
-func (h *Heap[A]) Push(v A) {
-	h.Values = append(h.Values, v)
-	h.up(len(h.Values) - 1)
-}
-
-// Peek returns the first (smallest) element in the heap.
-func (h *Heap[A]) Peek() (output A, ok bool) {
-	if len(h.Values) == 0 {
-		return
-	}
-	output = h.Values[0]
-	ok = true
-	return
-}
-
-// Pop removes and returns the minimum element (according to Less) from the heap.
-// The complexity is O(log n) where n = h.Len().
-// Pop is equivalent to Remove(h, 0).
-func (h *Heap[A]) Pop() (output A, ok bool) {
-	if len(h.Values) == 0 {
-		return
-	}
-
-	// heap pop
-	n := len(h.Values) - 1
-	h.swap(0, n)
-	h.down(0, n)
-
-	// intheap pop
-	old := h.Values
-	n = len(old)
-	output = old[n-1]
-	ok = true
-	h.Values = old[0 : n-1]
-	return
-}
-
-// Fix re-establishes the heap ordering after the element at index i has changed its value.
-// Changing the value of the element at index i and then calling Fix is equivalent to,
-// but less expensive than, calling Remove(h, i) followed by a Push of the new value.
-// The complexity is O(log n) where n = h.Len().
-func (h *Heap[A]) Fix(i int) {
-	if !h.down(i, len(h.Values)) {
-		h.up(i)
-	}
-}
-
-// Remove removes and returns the element at index i from the heap.
-// The complexity is O(log n) where n = h.Len().
-func (h *Heap[A]) Remove(i int) (output A, ok bool) {
-	n := len(h.Values) - 1
-	if n != i {
-		h.swap(i, n)
-		if !h.down(i, n) {
-			h.up(i)
-		}
-	}
-	return h.Pop()
-}
-
-//
-// internal helpers
-//
-
-func (h *Heap[A]) swap(i, j int) {
-	h.Values[i], h.Values[j] = h.Values[j], h.Values[i]
-}
-
-func (h *Heap[A]) up(j int) {
-	for {
-		i := (j - 1) / 2 // parent
-		if i == j || !h.Less(h.Values[j], h.Values[i]) {
-			break
-		}
-		h.swap(i, j)
-		j = i
-	}
-}
-
-func (h *Heap[A]) down(i0, n int) bool {
-	i := i0
-	for {
-		j1 := 2*i + 1
-		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
-			break
-		}
-		j := j1 // left child
-		if j2 := j1 + 1; j2 < n && h.Less(h.Values[j2], h.Values[j1]) {
-			j = j2 // = 2*i + 2  // right child
-		}
-		if !h.Less(h.Values[j], h.Values[i]) {
-			break
-		}
-		h.swap(i, j)
-		i = j
-	}
-	return i > i0
 }

@@ -1,0 +1,4 @@
+# github.com/wcharczuk/extlib v0.0.0-20220219194341-f02b7f8ea54d
+## explicit; go 1.18
+github.com/wcharczuk/extlib/cli
+github.com/wcharczuk/extlib/collections
