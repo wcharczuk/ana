@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
-	"github.com/wcharczuk/extlib/cli"
-	"github.com/wcharczuk/extlib/collections"
+	"github.com/urfave/cli/v2"
 )
 
 //go:embed dictionary.txt
 var dictionary []byte
 
-var alphabet = []rune("abcdefghijklmnopqrstuvwxyz")
+// MASK_CHAR is the character we use as a wildcard in masks.
+const MASK_CHAR = '_'
 
 var app = &cli.App{
 	Name:  "wordle",
@@ -29,24 +30,20 @@ var app = &cli.App{
 			Usage: "The dictionary path (optional, will use embedded dictionary by default)",
 		},
 		&cli.StringFlag{
-			Name:  "mask",
-			Usage: "The position mask to match (e.g. ?i?e??)",
+			Name:  "green",
+			Usage: "The position of the matched letters in mask form (e.g. 'WO__L')",
+		},
+		&cli.StringSliceFlag{
+			Name:  "yellow",
+			Usage: "The yellows in position mask form (can be multiple!)",
 		},
 		&cli.StringFlag{
-			Name:  "known",
-			Usage: "The known letter set",
-		},
-		&cli.StringFlag{
-			Name:  "exclude",
-			Usage: "The excluded letter set",
-		},
-		&cli.BoolFlag{
-			Name:  "analyze",
-			Usage: "If we should analyze results",
+			Name:  "gray",
+			Usage: "The excluded letter set as a string (e.g. 'ergv')",
 		},
 		&cli.IntFlag{
 			Name:  "limit",
-			Usage: "If we should limit results",
+			Usage: "If we should limit the number of results shown.",
 		},
 	},
 }
@@ -65,77 +62,49 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 
-	exclude := collections.NewSet([]rune(ctx.String("exclude")))
-	var maybe []rune
-	for _, c := range alphabet {
-		if !exclude.Has(c) {
-			maybe = append(maybe, c)
+	flagLimit := ctx.Int("limit")
+	yellows := ctx.StringSlice("yellow")
+	green := []rune(ctx.String("green"))
+	gray := []rune(ctx.String("gray"))
+
+	var isDebug = os.Getenv("DEBUG") != ""
+	debugf := func(format string, args ...any) {
+		if isDebug {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		}
-	}
-
-	known := ctx.String("known")
-	mask := ctx.String("mask")
-
-	fmt.Printf("using alphabet: %s\n", string(maybe))
-	fmt.Printf("using knowns: %s\n", known)
-	fmt.Printf("using mask: %s\n", mask)
-
-	knownPermutations := permutations(known, string(maybe), mask)
-
-	maskRunes := []rune(mask)
-	analyzeDict := make(collections.Set[string])
-	analyzeResults := &collections.Heap[WordStats]{
-		LessFn: func(a, b WordStats) bool {
-			if a.UniqueLetters > b.UniqueLetters {
-				return true
-			}
-			return (a.Green + a.Yellow) > (b.Green + b.Yellow)
-		},
 	}
 
 	var count int
 	for dictWord := range dict {
-		if knownPermutations != nil && !knownPermutations.Has(dictWord) {
+		dictWordRunes := []rune(dictWord)
+		if !greenMatches(green, dictWordRunes) {
+			debugf("skipping %q; doesn't match greens %q", dictWord, string(green))
 			continue
 		}
-		if !matchesPositionMask(maskRunes, []rune(dictWord)) {
+		if !yellowsMatches(yellows, dictWordRunes) {
+			debugf("skipping %q; doesn't match yellows %q", dictWord, strings.Join(yellows, ", "))
 			continue
 		}
-		if excludeMatches(exclude, []rune(dictWord)) {
+		if !grayMatches(gray, dictWordRunes) {
+			debugf("skipping %q; doesn't match grays %q", dictWord, string(gray))
 			continue
 		}
-		if ctx.Bool("analyze") {
-			analyzeDict.Add(dictWord)
-		} else {
-			if flagLimit := ctx.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
-				fmt.Println(dictWord)
-				count++
-			}
-		}
-	}
-
-	if ctx.Bool("analyze") {
-		for word := range analyzeDict {
-			analyzeResults.Push(analyze(analyzeDict, word))
-		}
-		for _, ws := range analyzeResults.Values {
-			if flagLimit := ctx.Int("limit"); flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
-				fmt.Printf("%s: %d/%d\n", ws.Word, ws.Green, ws.Yellow)
-				count++
-			}
+		if flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
+			fmt.Println(dictWord)
+			count++
 		}
 	}
 	return nil
 }
 
-func getDictionary(dictPath string) (collections.Set[string], error) {
+func getDictionary(dictPath string) (Set[string], error) {
 	r, err := getDictionaryReader(dictPath)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	output := make(collections.Set[string])
+	output := make(Set[string])
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		output.Add(scanner.Text())
@@ -154,185 +123,105 @@ func getDictionaryReader(dictPath string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(dictionary)), nil
 }
 
-func excludeMatches(excludes collections.Set[rune], wordRunes []rune) bool {
-	for _, r := range wordRunes {
-		if excludes.Has(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchesPositionMask(mask, input []rune) bool {
-	if len(mask) == 0 && len(input) == 0 {
+func greenMatches(greens, input []rune) bool {
+	if len(greens) == 0 && len(input) == 0 {
 		return false
 	}
-	if len(mask) == 0 && len(input) > 0 {
+	if len(greens) == 0 && len(input) > 0 {
 		return true
 	}
-	if len(mask) != len(input) {
+	if len(greens) != len(input) {
 		return false
 	}
 	for index, r := range input {
-		if mask[index] == '?' {
+		if greens[index] == MASK_CHAR {
 			continue
 		}
-		if mask[index] != r {
+		if greens[index] != r {
 			return false
 		}
 	}
 	return true
 }
 
-func permutations(known, maybe, mask string) collections.Set[string] {
-	if known == "" {
-		return nil
-	}
-
-	knownRunes := []rune(known)
-	maybeRunes := []rune(maybe)
-	maskRunes := []rune(mask)
-	if len(knownRunes) == len(maskRunes) {
-		return collections.NewSet(_permutations(knownRunes, 0, maskRunes, nil))
-	}
-
-	output := make(collections.Set[string])
-	missing := 5 - len(knownRunes)
-
-	for _, adds := range chooseAny(maybeRunes, missing) {
-		results := _permutations(concat(knownRunes, adds...), 0, maskRunes, nil)
-		for _, res := range results {
-			output.Add(res)
+// yellowsMatches returns if _all_ of the given yellow masks
+// match the give input.
+//
+// a yellow match is given as the yellow letter counts being a
+// strict subset of the input letter counts.
+func yellowsMatches(yellows []string, input []rune) bool {
+	inputCounts := runeCounts(input)
+	for _, y := range yellows {
+		yCounts := runeCounts([]rune(y))
+		if !runeCountsWithin(yCounts, inputCounts) {
+			return false
 		}
 	}
-	return output
+	return true
 }
 
-func _permutations(input []rune, index int, mask, working []rune) (output []string) {
-	if index == len(input) {
-		if matchesPositionMask(mask, working) {
-			output = []string{string(working)}
-		}
-		return
-	}
-
-	c := input[index]
-	for x := 0; x <= len(working); x++ {
-		output = append(output,
-			_permutations(input, index+1, mask, insertAt(working, c, x))...,
-		)
-	}
-	return
-}
-
-func insertAt(input []rune, r rune, index int) []rune {
-	output := make([]rune, len(input)+1)
-	copy(output[:index], input[:index])
-	output[index] = r
-	copy(output[index+1:], input[index:])
-	return output
-}
-
-func concat(a []rune, b ...rune) []rune {
-	output := make([]rune, 0, len(a)+len(b))
-	for _, r := range a {
-		output = append(output, r)
-	}
-	for _, r := range b {
-		output = append(output, r)
-	}
-	return output
-}
-
-func choose(input []rune, count int) (output [][]rune) {
-	max := 1 << len(input)
-	for x := 0; x < max; x++ {
-		var index int
-		var w []rune
-
-		// start with all the bits of x
-		// we only consider up to x
-		// because left of x's value will be zeros
-		for y := x; y > 0; y >>= 1 {
-			// test if the _last_ bit is on
-			// or off, if it's on, add the char
-			// we do this with the value (1)
-			// instead of all ones
-			// if 1011 & 1 == 1, then the
-			// last bit was one
-			if (y & 1) == 1 {
-				w = append(w, input[index])
+// grayMatches returns if _none_ of the runes in the gray list
+// appear in the input.
+func grayMatches(grays, input []rune) bool {
+	for _, gc := range grays {
+		for _, gi := range input {
+			if gc == gi {
+				return false
 			}
-			index++
-		}
-		if len(w) == count {
-			output = append(output, w)
 		}
 	}
-	return
+	return true
 }
 
-func chooseAny(input []rune, count int) [][]rune {
-	if count <= 0 {
-		return nil
-	}
-	return _chooseAny(input, count, 0, nil)
-}
-
-func _chooseAny(input []rune, count, index int, working []rune) (output [][]rune) {
-	if len(working) == count {
-		return [][]rune{working}
-	}
-	if index == len(input) {
-		return nil
-	}
-	output = append(output,
-		_chooseAny(input, count, index+1, concat(working, input[index]))...,
-	)
-	output = append(output,
-		_chooseAny(input, count, index+1, working)...,
-	)
-	return
-}
-
-func analyze(dict collections.Set[string], word string) (output WordStats) {
-	output.Word = word
-	wordRunes := []rune(word)
-	wordRuneSet := collections.NewSet(wordRunes)
-	output.UniqueLetters = len(wordRuneSet)
-	for dictionaryWord := range dict {
-		if word == dictionaryWord {
-			continue
+// runeCounts returns a map of each rune in a given input
+// mapped to the count or number of times that rune appears
+// in the input list.
+func runeCounts(input []rune) map[rune]int {
+	output := make(map[rune]int)
+	for _, c := range input {
+		if c != MASK_CHAR {
+			output[c] += 1
 		}
-		green, yellow, miss := compareWords(wordRunes, wordRuneSet, dictionaryWord)
-		output.Green += green
-		output.Yellow += yellow
-		output.Miss += miss
 	}
-	return
+	return output
 }
 
-func compareWords(sourceWordRunes []rune, sourceWordRuneSet collections.Set[rune], guessWord string) (green, yellow, miss int) {
-	guessWordRunes := []rune(guessWord)
-	for x := 0; x < len(guessWordRunes); x++ {
-		if sourceWordRunes[x] == guessWordRunes[x] {
-			green++
-			continue
+// runeCountsWithin returns if a is a strict subset of b.
+//
+// strictly "subset" means every key in a exists in b, and
+// the counts for each key in a is less than or equal to the count in b.
+func runeCountsWithin(a, b map[rune]int) bool {
+	for key, aCount := range a {
+		bCount, ok := b[key]
+		if !ok {
+			return false
 		}
-		if sourceWordRuneSet.Has(guessWordRunes[x]) {
-			yellow++
-			continue
+		if aCount > bCount {
+			return false
 		}
-		miss++
-		continue
 	}
-	return
+	return true
 }
 
-type WordStats struct {
-	Word          string
-	UniqueLetters int
-	Green         int
-	Yellow        int
-	Miss          int
+// NewSet creates a new set.
+func NewSet[A comparable](values []A) Set[A] {
+	s := make(Set[A])
+	for _, v := range values {
+		s.Add(v)
+	}
+	return s
+}
+
+// Set is a generic set.
+type Set[A comparable] map[A]struct{}
+
+// Add adds a given element.
+func (s *Set[A]) Add(v A) {
+	(*s)[v] = struct{}{}
+}
+
+// Has returns if a given element exists.
+func (s *Set[A]) Has(v A) bool {
+	_, ok := (*s)[v]
+	return ok
 }
