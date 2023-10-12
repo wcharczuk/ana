@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -45,6 +46,11 @@ var app = &cli.App{
 			Name:  "limit",
 			Usage: "If we should limit the number of results shown.",
 		},
+		&cli.BoolFlag{
+			Name:    "match",
+			Aliases: []string{"m"},
+			Usage:   "If we should show match results.",
+		},
 	},
 }
 
@@ -74,27 +80,79 @@ func action(ctx *cli.Context) error {
 		}
 	}
 
-	var count int
-	for dictWord := range dict {
-		dictWordRunes := []rune(dictWord)
-		if !greenMatches(green, dictWordRunes) {
-			debugf("skipping %q; doesn't match greens %q", dictWord, string(green))
-			continue
+	if ctx.Bool("match") {
+		var matched []wordWithScore
+		for dictWord := range dict {
+			dictWordRunes := []rune(dictWord)
+			if !greenMatches(green, dictWordRunes) {
+				debugf("skipping %q; doesn't match greens %q", dictWord, string(green))
+				continue
+			}
+			if !yellowsMatchesAll(yellows, dictWord) {
+				debugf("skipping %q; doesn't match yellows %q", dictWord, strings.Join(yellows, ", "))
+				continue
+			}
+			if !grayMatches(gray, dictWordRunes) {
+				debugf("skipping %q; doesn't match grays %q", dictWord, string(gray))
+				continue
+			}
+			matched = append(matched, wordWithScore{
+				Word:  dictWord,
+				Score: scoreWordMatch(dictWord),
+			})
 		}
-		if !yellowsMatches(yellows, dictWordRunes) {
-			debugf("skipping %q; doesn't match yellows %q", dictWord, strings.Join(yellows, ", "))
-			continue
+		sort.SliceStable(matched, func(i, j int) bool {
+			return matched[i].Score > matched[j].Score
+		})
+		for index, ws := range matched {
+			fmt.Printf("%s (%d)\n", ws.Word, ws.Score)
+			if flagLimit > 0 && index > flagLimit {
+				break
+			}
 		}
-		if !grayMatches(gray, dictWordRunes) {
-			debugf("skipping %q; doesn't match grays %q", dictWord, string(gray))
-			continue
+	} else {
+		var discover []wordWithScore
+		for dictWord := range dict {
+			dictWordRunes := []rune(dictWord)
+			if len(green) > 0 {
+				if greenMatches(green, dictWordRunes) {
+					debugf("skipping %q for discovery; matches greens %q", dictWord, green)
+					continue
+				}
+			}
+			if yellowsMatchesAny(yellows, dictWord) {
+				debugf("skipping %q for discovery; matches yellows %q", dictWord, strings.Join(yellows, ", "))
+				continue
+			}
+			if !grayMatches(gray, dictWordRunes) {
+				debugf("skipping %q for discovery; doesn't match grays %q", dictWord, string(gray))
+				continue
+			}
+			discover = append(discover, wordWithScore{
+				Word:  dictWord,
+				Score: scoreWordMatch(dictWord),
+			})
 		}
-		if flagLimit == 0 || (flagLimit > 0 && count < flagLimit) {
-			fmt.Println(dictWord)
-			count++
+		sort.SliceStable(discover, func(i, j int) bool {
+			return discover[i].Score > discover[j].Score
+		})
+
+		if len(discover) > 0 {
+			for index, ws := range discover {
+				fmt.Printf("%s (%d)\n", ws.Word, ws.Score)
+				if flagLimit > 0 && index > flagLimit {
+					break
+				}
+			}
 		}
 	}
+
 	return nil
+}
+
+type wordWithScore struct {
+	Word  string
+	Score int
 }
 
 func getDictionary(dictPath string) (Set[string], error) {
@@ -144,20 +202,36 @@ func greenMatches(greens, input []rune) bool {
 	return true
 }
 
-// yellowsMatches returns if _all_ of the given yellow masks
+// yellowsMatchesAll returns true if _all_ of the given yellow masks
 // match the give input.
 //
 // a yellow match is given as the yellow letter counts being a
 // strict subset of the input letter counts.
-func yellowsMatches(yellows []string, input []rune) bool {
+func yellowsMatchesAll(yellows []string, input string) bool {
 	inputCounts := runeCounts(input)
 	for _, y := range yellows {
-		yCounts := runeCounts([]rune(y))
+		yCounts := runeCounts(y)
 		if !runeCountsWithin(yCounts, inputCounts) {
 			return false
 		}
 	}
 	return true
+}
+
+// yellowsMatchesNone returns true if _any_ of the given yellow masks
+// match the give input.
+//
+// a yellow match is given as the yellow letter counts being a
+// strict subset of the input letter counts.
+func yellowsMatchesAny(yellows []string, input string) bool {
+	inputCounts := runeCounts(input)
+	yCounts := runeCounts(yellows...)
+	for key := range yCounts {
+		if _, ok := inputCounts[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // grayMatches returns if _none_ of the runes in the gray list
@@ -176,11 +250,13 @@ func grayMatches(grays, input []rune) bool {
 // runeCounts returns a map of each rune in a given input
 // mapped to the count or number of times that rune appears
 // in the input list.
-func runeCounts(input []rune) map[rune]int {
+func runeCounts(inputs ...string) map[rune]int {
 	output := make(map[rune]int)
-	for _, c := range input {
-		if c != MASK_CHAR {
-			output[c] += 1
+	for _, input := range inputs {
+		for _, c := range input {
+			if c != MASK_CHAR {
+				output[c] += 1
+			}
 		}
 	}
 	return output
@@ -224,4 +300,53 @@ func (s *Set[A]) Add(v A) {
 func (s *Set[A]) Has(v A) bool {
 	_, ok := (*s)[v]
 	return ok
+}
+
+/*
+scrabble score is given as:
+1 point – A   E   I   O   U   L   N   S   T   R
+2 points – D   G
+3 points – B   C   M   P
+4 points – F   H   V   W   Y
+5 points – K
+8 points – J  X
+10 points – Q  Z
+*/
+
+func scoreWordInvertedScrabble(c rune) int {
+	switch c {
+	case 'a', 'e', 'i', 'o', 'u', 'l', 'n', 's', 't', 'r':
+		return 10
+	case 'd', 'g':
+		return 8
+	case 'b', 'c', 'm', 'p':
+		return 5
+	case 'f', 'h', 'v', 'w', 'y':
+		return 4
+	case 'k':
+		return 3
+	case 'j', 'x':
+		return 2
+	case 'q', 'z':
+		return 1
+	default:
+		panic("invalid letter for inverted scrabble scoring")
+	}
+}
+
+func scoreWordUnique(word string) int {
+	s := make(Set[rune])
+	for _, c := range word {
+		s.Add(c)
+	}
+	return len(s)
+}
+
+func scoreWordMatch(word string) int {
+	var invertedScrabbleScore int
+	for _, c := range word {
+		invertedScrabbleScore += scoreWordInvertedScrabble(c)
+	}
+	uniqueScore := scoreWordUnique(word)
+	return (uniqueScore * 20) + invertedScrabbleScore
 }
