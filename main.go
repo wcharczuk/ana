@@ -136,7 +136,6 @@ func action(ctx *cli.Context) error {
 		sort.SliceStable(discover, func(i, j int) bool {
 			return discover[i].Score > discover[j].Score
 		})
-
 		if len(discover) > 0 {
 			for index, ws := range discover {
 				fmt.Printf("%s (%d)\n", ws.Word, ws.Score)
